@@ -6,9 +6,9 @@ import sqlite3
 import pandas as pd
 
 # File paths for the models and data
-random_forest_model_path = r'C:\Users\amrut\OneDrive\Desktop\BMSCE\6th Sem\MLG Project\random_forest_model.pkl'
-svm_model_path = r'C:\Users\amrut\OneDrive\Desktop\BMSCE\6th Sem\MLG Project\svm_model.pkl'
-voting_classifier_model_path = r'C:\Users\amrut\OneDrive\Desktop\BMSCE\6th Sem\MLG Project\voting_classifier_model.pkl'
+random_forest_model_path = r'random_forest_model.pkl'
+svm_model_path = r'svm_model.pkl'
+voting_classifier_model_path = r'voting_classifier_model.pkl'
 
 data_path = 'NSL_KDD.csv'
 predictions_db = 'predictions.db'

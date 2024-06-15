@@ -1,12 +1,14 @@
-# %% 
 import pandas as pd
-from sklearn.model_selection import train_test_split, cross_val_score
+import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix, make_scorer, classification_report
 from sklearn.impute import SimpleImputer
 import joblib
 
@@ -28,6 +30,26 @@ file_path = 'NSL_KDD.csv'  # Path to the uploaded NSL-KDD dataset
 # Read the dataset and handle potential issues
 data = pd.read_csv(file_path, names=col_names, low_memory=False)
 
+
+# Define the mapping from detailed attack types to main categories
+category_mapping = {
+    'normal': 'normal',
+    'back': 'DoS', 'land': 'DoS', 'neptune': 'DoS', 'pod': 'DoS', 'smurf': 'DoS', 'teardrop': 'DoS',
+    'mailbomb': 'DoS', 'apache2': 'DoS', 'processtable': 'DoS', 'udpstorm': 'DoS',
+    'ftp_write': 'R2L', 'guess_passwd': 'R2L', 'imap': 'R2L', 'multihop': 'R2L', 'phf': 'R2L', 'spy': 'R2L',
+    'warezclient': 'R2L', 'warezmaster': 'R2L', 'sendmail': 'R2L', 'named': 'R2L', 'snmpgetattack': 'R2L',
+    'snmpguess': 'R2L', 'xlock': 'R2L', 'xsnoop': 'R2L', 'worm': 'R2L',
+    'buffer_overflow': 'U2R', 'loadmodule': 'U2R', 'perl': 'U2R', 'rootkit': 'U2R', 'httptunnel': 'U2R',
+    'ps': 'U2R', 'sqlattack': 'U2R', 'xterm': 'U2R',
+    'ipsweep': 'Probe', 'nmap': 'Probe', 'portsweep': 'Probe', 'satan': 'Probe', 'mscan': 'Probe', 'saint': 'Probe'
+}
+
+# Apply the mapping to the dataset
+data['label'] = data['label'].map(category_mapping)
+
+# Drop rows with unmapped labels (if any)
+data = data.dropna(subset=['label'])
+
 # Convert appropriate columns to numeric, using coercion to handle errors
 for col in col_names[:-1]:  # Exclude the label column
     data[col] = pd.to_numeric(data[col], errors='coerce')
@@ -37,7 +59,6 @@ for col in col_names[:-1]:  # Exclude the label column
 X = data.iloc[:, :-1]
 y = data.iloc[:, -1]
 
-# %%
 # Impute missing values for numerical data
 num_imputer = SimpleImputer(strategy='mean')
 X.loc[:, X.columns.difference(['protocol_type', 'service', 'flag'])] = num_imputer.fit_transform(
@@ -57,101 +78,239 @@ preprocessor = ColumnTransformer(
         ('cat', OneHotEncoder(), categorical_features)
     ])
 
+# Split the dataset into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
 # Create a pipeline that includes preprocessing and the classifier
 rf_clf = Pipeline(steps=[('preprocessor', preprocessor),
                          ('classifier', RandomForestClassifier(n_estimators=100, random_state=42))])
 
-# Split the dataset into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+svm_clf = Pipeline(steps=[('preprocessor', preprocessor),
+                                ('classifier', SVC(kernel='linear', random_state=42))])
+
+voting_clf = Pipeline(steps=[('preprocessor', preprocessor),
+                                ('classifier', VotingClassifier(estimators=[('rf', rf_clf.named_steps['classifier']),
+                                                                    ('svc', svm_clf.named_steps['classifier'])], voting='hard'))])
+
+
+# Performing Principal Component Analysis to decompose the 41 existing features to only 20 features
+n_components = 20  # Set the number of principal components
+
+# # Creating a pipeline that includes preprocessing, PCA, and the classifier
+# pca = PCA(n_components=n_components)
+# X_pca = pca.fit_transform(X)
+# X_train_pca, X_test_pca, y_train_pca, y_test_pca = train_test_split(X_pca, y, test_size=0.2, random_state=42)
+
+# imputer = SimpleImputer(strategy='mean') 
+# X = imputer.fit_transform(X)
+# pca = PCA(n_components=n_components)
+# X_pca = pca.fit_transform(X)
+
+pca_pipeline = Pipeline(steps=[
+    ('preprocessor', preprocessor),
+    ('pca', PCA(n_components=n_components)),
+    # ('classifier', RandomForestClassifier(n_estimators=100, random_state=42))
+])
+
+X_pca = pca_pipeline.fit(X)
 
 # Train and evaluate the RandomForest model
-rf_clf.fit(X_train, y_train)
-y_pred_rf = rf_clf.predict(X_test)
-print("**All attacks - RandomForest**")
-print(f"Accuracy: {accuracy_score(y_test, y_pred_rf):.5f}")
-print(f"Precision: {precision_score(y_test, y_pred_rf, average='macro'):.5f}")
-print(f"Recall: {recall_score(y_test, y_pred_rf, average='macro'):.5f}")
-print(f"F1 Score: {f1_score(y_test, y_pred_rf, average='macro'):.5f}")
-print(confusion_matrix(y_test, y_pred_rf))
-print()
+def RandomForest():
+    rf_clf.fit(X_train, y_train)
+    y_pred_rf = rf_clf.predict(X_test)
+    print("RandomForest")
+    print(f"Accuracy: {accuracy_score(y_test, y_pred_rf):.5f}")
+    print(f"Precision: {precision_score(y_test, y_pred_rf, average='macro',zero_division=1):.5f}")
+    print(f"Recall: {recall_score(y_test, y_pred_rf, average='macro'):.5f}")
+    print(f"F1 Score: {f1_score(y_test, y_pred_rf, average='macro'):.5f}")
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test, y_pred_rf))
+    print()
 
-# Save the RandomForest model
-joblib.dump(rf_clf, 'random_forest_model.pkl')
-# %%
-# Train and evaluate the SVM model for DoS
-svm_dos_clf = Pipeline(steps=[('preprocessor', preprocessor),
-                              ('classifier', SVC(kernel='linear', random_state=42))])
-svm_dos_clf.fit(X_train, y_train)
-y_pred_svm_dos = svm_dos_clf.predict(X_test)
-print("**DoS - SVM**")
-print(f"Accuracy: {accuracy_score(y_test, y_pred_svm_dos):.5f}")
-print(f"Precision: {precision_score(y_test, y_pred_svm_dos, average='macro'):.5f}")
-print(f"Recall: {recall_score(y_test, y_pred_svm_dos, average='macro'):.5f}")
-print(f"F1 Score: {f1_score(y_test, y_pred_svm_dos, average='macro'):.5f}")
-print(confusion_matrix(y_test, y_pred_svm_dos))
-print()
+    report = classification_report(y_test, y_pred_rf)
+    print(report)
 
-# Save the SVM model for DoS
-joblib.dump(svm_dos_clf, 'svm_model.pkl')
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(confusion_matrix(y_test, y_pred_rf), annot=True, fmt="d", cmap="YlGnBu", xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("Confusion Matrix Heatmap for Random Forest on NSL-KDD (5 Main Categories)")
+    plt.show()
 
-# Train and evaluate the Voting Classifier for R2L
-voting_r2l_clf = Pipeline(steps=[('preprocessor', preprocessor),
-                                 ('classifier', VotingClassifier(estimators=[('rf', rf_clf.named_steps['classifier']),
-                                                                             ('svc', svm_dos_clf.named_steps['classifier'])], voting='hard'))])
-voting_r2l_clf.fit(X_train, y_train)
-y_pred_voting_r2l = voting_r2l_clf.predict(X_test)
-print("**R2L - Voting Classifier**")
-print(f"Accuracy: {accuracy_score(y_test, y_pred_voting_r2l):.5f}")
-print(f"Precision: {precision_score(y_test, y_pred_voting_r2l, average='macro'):.5f}")
-print(f"Recall: {recall_score(y_test, y_pred_voting_r2l, average='macro'):.5f}")
-print(f"F1 Score: {f1_score(y_test, y_pred_voting_r2l, average='macro'):.5f}")
-print(confusion_matrix(y_test, y_pred_voting_r2l))
-print()
 
-# Save the Voting Classifier for R2L
-joblib.dump(voting_r2l_clf, 'voting_classifier_model.pkl')
+    # Save the RandomForest model
+    joblib.dump(rf_clf, 'random_forest_model.pkl')
 
-# Train and evaluate the RandomForest model for Probe
-print("**Probe - RandomForest**")
-print(f"Accuracy: {accuracy_score(y_test, y_pred_rf):.5f}")
-print(f"Precision: {precision_score(y_test, y_pred_rf, average='macro'):.5f}")
-print(f"Recall: {recall_score(y_test, y_pred_rf, average='macro'):.5f}")
-print(f"F1 Score: {f1_score(y_test, y_pred_rf, average='macro'):.5f}")
-print(confusion_matrix(y_test, y_pred_rf))
-print()
 
-# Cross-validation for RandomForest
-print("Cross-validation for RandomForest:")
-accuracy = cross_val_score
-# RandomForest (continued)
-accuracy = cross_val_score(rf_clf, X_test, y_test, cv=10, scoring='accuracy')
-print("Accuracy: %0.5f (+/- %0.5f)" % (accuracy.mean(), accuracy.std() * 2))
-precision = cross_val_score(rf_clf, X_test, y_test, cv=10, scoring='precision_macro')
-print("Precision: %0.5f (+/- %0.5f)" % (precision.mean(), precision.std() * 2))
-recall = cross_val_score(rf_clf, X_test, y_test, cv=10, scoring='recall_macro')
-print("Recall: %0.5f (+/- %0.5f)" % (recall.mean(), recall.std() * 2))
-f = cross_val_score(rf_clf, X_test, y_test, cv=10, scoring='f1_macro')
-print("F-measure: %0.5f (+/- %0.5f)" % (f.mean(), f.std() * 2))
-# %%
+# Train and evaluate the RandomForest model with PCA
+def RandomForestPCA():
+    
 
-# Predicting a new instance
-def predict_new_instance(new_instance, model, preprocessor, label_encoder, columns):
-    # Convert new_instance to DataFrame
-    new_instance_df = pd.DataFrame([new_instance], columns=columns)
-    # Preprocess the new instance
-    new_instance_preprocessed = preprocessor.transform(new_instance_df)
-    prediction = model.predict(new_instance_preprocessed)
-    prediction_label = label_encoder.inverse_transform(prediction)
-    return prediction_label[0]
+    rf_clf.fit(X_train_pca, y_train_pca)
+    y_pred_rf_pca = pca.predict(X_test_pca)
+    print("RandomForest with PCA")
+    print(f"Accuracy: {accuracy_score(y_test_pca, y_pred_rf_pca):.5f}")
+    print(f"Precision: {precision_score(y_test_pca, y_pred_rf_pca, average='macro', zero_division=1):.5f}")
+    print(f"Recall: {recall_score(y_test_pca, y_pred_rf_pca, average='macro'):.5f}")
+    print(f"F1 Score: {f1_score(y_test_pca, y_pred_rf_pca, average='macro'):.5f}")
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test_pca, y_pred_rf_pca))
+    print()
 
-# Example usage
-new_instance = X.iloc[0].values  # Example: using the first instance from the dataset
-predicted_label = predict_new_instance(new_instance, rf_clf, preprocessor, label_encoder, X.columns)
-print(predicted_label)
+    report = classification_report(y_test_pca, y_pred_rf_pca)
+    print(report)
 
-# Check if the predicted label is normal or an attack
-if predicted_label == 'normal':
-    print("The new instance is normal.")
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(confusion_matrix(y_test_pca, y_pred_rf_pca), annot=True, fmt="d", cmap="YlGnBu", xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("Confusion Matrix Heatmap for Random Forest with PCA on NSL-KDD (5 Main Categories)")
+    plt.show()
+
+    # Save the RandomForest model with PCA
+    joblib.dump(rf_clf, 'random_forest_pca_model.pkl')
+
+def SVM():
+    # Train and evaluate the SVM model
+    svm_clf.fit(X_train, y_train)
+    y_pred_svm = svm_clf.predict(X_test)
+    print("Support Vector Machine")
+    print(f"Accuracy: {accuracy_score(y_test, y_pred_svm):.5f}")
+    print(f"Precision: {precision_score(y_test, y_pred_svm, average='macro',zero_division=1):.5f}")
+    print(f"Recall: {recall_score(y_test, y_pred_svm, average='macro',zero_division=1):.5f}")
+    print(f"F1 Score: {f1_score(y_test, y_pred_svm, average='macro'):.5f}")
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test, y_pred_svm))
+    print()
+
+    report = classification_report(y_test, y_pred_svm)
+    print(report)
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(confusion_matrix(y_test, y_pred_svm), annot=True, fmt="d", cmap="YlGnBu", xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("Confusion Matrix Heatmap for Support Vector Machine on NSL-KDD (5 Main Categories)")
+    plt.show()
+
+
+    # Save the SVM model
+    joblib.dump(svm_clf, 'svm_model.pkl')
+
+
+# Train and evaluate the RandomForest model with PCA
+def RandomForestPCA():
+    
+
+    rf_clf.fit(X_train_pca, y_train_pca)
+    y_pred_rf_pca = pca.predict(X_test_pca)
+    print("RandomForest with PCA")
+    print(f"Accuracy: {accuracy_score(y_test_pca, y_pred_rf_pca):.5f}")
+    print(f"Precision: {precision_score(y_test_pca, y_pred_rf_pca, average='macro', zero_division=1):.5f}")
+    print(f"Recall: {recall_score(y_test_pca, y_pred_rf_pca, average='macro'):.5f}")
+    print(f"F1 Score: {f1_score(y_test_pca, y_pred_rf_pca, average='macro'):.5f}")
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test_pca, y_pred_rf_pca))
+    print()
+
+    report = classification_report(y_test_pca, y_pred_rf_pca)
+    print(report)
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(confusion_matrix(y_test_pca, y_pred_rf_pca), annot=True, fmt="d", cmap="YlGnBu", xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("Confusion Matrix Heatmap for Random Forest with PCA on NSL-KDD (5 Main Categories)")
+    plt.show()
+
+    # Save the RandomForest model with PCA
+    joblib.dump(rf_clf, 'random_forest_pca_model.pkl')
+
+
+def Ensembling():
+    # Train and evaluate the Voting Classifier
+    voting_clf.fit(X_train, y_train)
+    y_pred_voting = voting_clf.predict(X_test)
+    print("Voting Classifier (Ensembling):")
+    print(f"Accuracy: {accuracy_score(y_test, y_pred_voting):.5f}")
+    print(f"Precision: {precision_score(y_test, y_pred_voting, average='macro',zero_division=1):.5f}")
+    print(f"Recall: {recall_score(y_test, y_pred_voting, average='macro',zero_division=1):.5f}")
+    print(f"F1 Score: {f1_score(y_test, y_pred_voting, average='macro'):.5f}")
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_test, y_pred_voting))
+    print()
+
+    report = classification_report(y_test, y_pred_voting)
+    print(report)
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(confusion_matrix(y_test, y_pred_voting), annot=True, fmt="d", cmap="YlGnBu", xticklabels=label_encoder.classes_, yticklabels=label_encoder.classes_)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    plt.title("Confusion Matrix Heatmap for Voting Classifier Ensembling on NSL-KDD (5 Main Categories)")
+    plt.show()
+
+
+    # Save the Voting Classifier
+    joblib.dump(voting_clf, 'voting_classifier_model.pkl')
+
+n = int(input("Choose your Machine Learning Model:\n1. Random Forest Classifier\n2. Support Vector Machine\n3. Voting Classifier\n4. All Models\n"))
+if n == 1:
+    RandomForest()
+    ch = int(input("1. Check the results for random forest after PCA Decomposition\n2. Continue\n"))
+    if ch == 1:
+        RandomForestPCA()
+    elif ch == 2:
+        pass
+    else:
+        print("Invalid Input")
+elif n==2:
+    SVM()
+elif n==3:
+    Ensembling()
+elif n==4:
+    RandomForest()
+    SVM()
+    Ensembling()
 else:
-    print("The new instance is an attack.")
-# %%
+    print("Invalid Input")
+
+
+# # # Cross-validation for RandomForest
+# cv = StratifiedKFold(n_splits=5)
+# print("Cross-validation for RandomForest:")
+
+# # Perform cross-validation on the training data
+# accuracy = cross_val_score(rf_clf, X_train, y_train, cv=10, scoring='accuracy')
+# print("Accuracy: %0.5f (+/- %0.5f)" % (accuracy.mean(), accuracy.std() * 2))
+
+# precision = cross_val_score(rf_clf, X_train, y_train, cv=10, scoring=make_scorer(precision_score, average='macro', zero_division=0))
+# print("Precision: %0.5f (+/- %0.5f)" % (precision.mean(), precision.std() * 2))
+
+# recall = cross_val_score(rf_clf, X_train, y_train, cv=10, scoring=make_scorer(recall_score, average='macro', zero_division=0))
+# print("Recall: %0.5f (+/- %0.5f)" % (recall.mean(), recall.std() * 2))
+
+# f1 = cross_val_score(rf_clf, X_train, y_train, cv=10, scoring=make_scorer(f1_score, average='macro', zero_division=0))
+# print("F-measure: %0.5f (+/- %0.5f)" % (f1.mean(), f1.std() * 2))
+
+
+# # Predicting a new instance
+# def predict_new_instance(new_instance, model, preprocessor, label_encoder, columns):
+#     # Convert new_instance to DataFrame
+#     new_instance_df = pd.DataFrame([new_instance], columns=columns)
+#     # Preprocess the new instance
+#     new_instance_preprocessed = preprocessor.transform(new_instance_df)
+#     prediction = model.predict(new_instance_preprocessed)
+#     prediction_label = label_encoder.inverse_transform(prediction)
+#     return prediction_label[0]
+
+# # Example usage
+# new_instance = X.iloc[0].values  # Example: using the first instance from the dataset
+# predicted_label = predict_new_instance(new_instance, rf_clf, preprocessor, label_encoder, X.columns)
+# print(predicted_label)
+
+# # Check if the predicted label is normal or an attack
+# if predicted_label == 'normal':
+#     print("The new instance is normal.")
+# else:
+#     print("The new instance is an attack.")
